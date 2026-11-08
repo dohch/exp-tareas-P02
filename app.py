@@ -2,7 +2,7 @@
 import sqlite3
 from datetime import date, datetime
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
 
@@ -117,8 +117,7 @@ def create_app(db_path: str = "tareas.db") -> Flask:
         if err:
             return error(err, 400)
 
-        prioridad = datos.get("prioridad", "media")
-        prioridad, err = validar_prioridad(prioridad)
+        prioridad, err = validar_prioridad(datos.get("prioridad", "media"))
         if err:
             return error(err, 400)
 
@@ -140,8 +139,7 @@ def create_app(db_path: str = "tareas.db") -> Flask:
 
     @app.get("/api/tareas")
     def listar_tareas():
-        q = request.args.get("q", "")
-        q = q.strip()
+        q = request.args.get("q", "").strip()
         estado = request.args.get("estado")
 
         if estado is not None and estado not in ("pendiente", "completada"):
@@ -210,11 +208,40 @@ def create_app(db_path: str = "tareas.db") -> Flask:
             return error("No se enviaron campos editables", 400)
 
         sql = "UPDATE tareas SET " + ", ".join(c + " = ?" for c in campos) + " WHERE id = ?"
-        valores = list(campos.values()) + [tarea_id]
-        db.execute(sql, valores)
+        db.execute(sql, list(campos.values()) + [tarea_id])
         db.commit()
 
         fila = db.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
         return jsonify(fila_a_dict(fila))
+
+    @app.post("/api/tareas/<int:tarea_id>/completar")
+    def completar_tarea(tarea_id):
+        db = get_db(app.config["DB_PATH"])
+        fila = db.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
+        if fila is None:
+            return error("La tarea no existe", 404)
+        if fila["completada"]:
+            return error("La tarea ya está completada", 409)
+
+        db.execute("UPDATE tareas SET completada = 1 WHERE id = ?", (tarea_id,))
+        db.commit()
+
+        fila = db.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
+        return jsonify(fila_a_dict(fila))
+
+    @app.delete("/api/tareas/<int:tarea_id>")
+    def eliminar_tarea(tarea_id):
+        db = get_db(app.config["DB_PATH"])
+        fila = db.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
+        if fila is None:
+            return error("La tarea no existe", 404)
+
+        db.execute("DELETE FROM tareas WHERE id = ?", (tarea_id,))
+        db.commit()
+        return "", 204
+
+    @app.get("/")
+    def index():
+        return render_template("index.html")
 
     return app
