@@ -48,6 +48,15 @@ def error(mensaje, codigo):
     return jsonify({"error": mensaje}), codigo
 
 
+def validar_titulo(valor):
+    if not isinstance(valor, str):
+        return None, "El título debe tener entre 3 y 100 caracteres"
+    valor = valor.strip()
+    if len(valor) < 3 or len(valor) > 100:
+        return None, "El título debe tener entre 3 y 100 caracteres"
+    return valor, None
+
+
 def validar_descripcion(valor):
     if valor is None:
         return "", None
@@ -56,6 +65,12 @@ def validar_descripcion(valor):
     valor = valor.strip()
     if len(valor) > 500:
         return None, "La descripción no puede superar los 500 caracteres"
+    return valor, None
+
+
+def validar_prioridad(valor):
+    if valor not in ("alta", "media", "baja"):
+        return None, "La prioridad debe ser alta, media o baja"
     return valor, None
 
 
@@ -94,20 +109,18 @@ def create_app(db_path: str = "tareas.db") -> Flask:
         if not isinstance(datos, dict):
             return error("El cuerpo debe ser un objeto JSON", 400)
 
-        titulo = datos.get("titulo")
-        if not isinstance(titulo, str):
-            return error("El título debe tener entre 3 y 100 caracteres", 400)
-        titulo = titulo.strip()
-        if len(titulo) < 3 or len(titulo) > 100:
-            return error("El título debe tener entre 3 y 100 caracteres", 400)
+        titulo, err = validar_titulo(datos.get("titulo"))
+        if err:
+            return error(err, 400)
 
         descripcion, err = validar_descripcion(datos.get("descripcion"))
         if err:
             return error(err, 400)
 
         prioridad = datos.get("prioridad", "media")
-        if prioridad not in ("alta", "media", "baja"):
-            return error("La prioridad debe ser alta, media o baja", 400)
+        prioridad, err = validar_prioridad(prioridad)
+        if err:
+            return error(err, 400)
 
         fecha_limite, err = validar_fecha_limite(datos.get("fecha_limite"))
         if err:
@@ -160,6 +173,48 @@ def create_app(db_path: str = "tareas.db") -> Flask:
         fila = db.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
         if fila is None:
             return error("La tarea no existe", 404)
+        return jsonify(fila_a_dict(fila))
+
+    @app.put("/api/tareas/<int:tarea_id>")
+    def editar_tarea(tarea_id):
+        datos = request.get_json(silent=True)
+        if not isinstance(datos, dict):
+            return error("El cuerpo debe ser un objeto JSON", 400)
+
+        db = get_db(app.config["DB_PATH"])
+        fila = db.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
+        if fila is None:
+            return error("La tarea no existe", 404)
+        if fila["completada"]:
+            return error("La tarea ya está completada", 409)
+
+        campos = {}
+        if "titulo" in datos:
+            campos["titulo"], err = validar_titulo(datos["titulo"])
+            if err:
+                return error(err, 400)
+        if "descripcion" in datos:
+            campos["descripcion"], err = validar_descripcion(datos["descripcion"])
+            if err:
+                return error(err, 400)
+        if "prioridad" in datos:
+            campos["prioridad"], err = validar_prioridad(datos["prioridad"])
+            if err:
+                return error(err, 400)
+        if "fecha_limite" in datos:
+            campos["fecha_limite"], err = validar_fecha_limite(datos["fecha_limite"])
+            if err:
+                return error(err, 400)
+
+        if not campos:
+            return error("No se enviaron campos editables", 400)
+
+        sql = "UPDATE tareas SET " + ", ".join(c + " = ?" for c in campos) + " WHERE id = ?"
+        valores = list(campos.values()) + [tarea_id]
+        db.execute(sql, valores)
+        db.commit()
+
+        fila = db.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
         return jsonify(fila_a_dict(fila))
 
     return app
