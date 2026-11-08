@@ -127,8 +127,31 @@ def create_app(db_path: str = "tareas.db") -> Flask:
 
     @app.get("/api/tareas")
     def listar_tareas():
+        q = request.args.get("q", "")
+        q = q.strip()
+        estado = request.args.get("estado")
+
+        if estado is not None and estado not in ("pendiente", "completada"):
+            return error("El estado debe ser pendiente o completada", 400)
+
+        sql = "SELECT * FROM tareas WHERE 1=1"
+        params = []
+
+        if q:
+            sql += " AND (LOWER(titulo) LIKE ? OR LOWER(descripcion) LIKE ?)"
+            patron = "%" + q.lower() + "%"
+            params.append(patron)
+            params.append(patron)
+
+        if estado == "pendiente":
+            sql += " AND completada = 0"
+        elif estado == "completada":
+            sql += " AND completada = 1"
+
+        sql += " ORDER BY id ASC"
+
         db = get_db(app.config["DB_PATH"])
-        filas = db.execute("SELECT * FROM tareas ORDER BY id ASC").fetchall()
+        filas = db.execute(sql, params).fetchall()
         return jsonify([fila_a_dict(f) for f in filas])
 
     @app.get("/api/tareas/<int:tarea_id>")
