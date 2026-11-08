@@ -125,4 +125,18 @@ def create_app(db_path: str = "tareas.db") -> Flask:
         fila = db.execute("SELECT * FROM tareas WHERE id = ?", (cur.lastrowid,)).fetchone()
         return jsonify(fila_a_dict(fila)), 201
 
+    @app.get("/api/tareas")
+    def listar_tareas():
+        db = get_db(app.config["DB_PATH"])
+        filas = db.execute("SELECT * FROM tareas ORDER BY id ASC").fetchall()
+        return jsonify([fila_a_dict(f) for f in filas])
+
+    @app.get("/api/tareas/<int:tarea_id>")
+    def obtener_tarea(tarea_id):
+        db = get_db(app.config["DB_PATH"])
+        fila = db.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
+        if fila is None:
+            return error("La tarea no existe", 404)
+        return jsonify(fila_a_dict(fila))
+
     return app
