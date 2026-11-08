@@ -1,6 +1,6 @@
 """Sistema web de gestión de tareas. Contrato: ver ESPECIFICACION.md, sección 3."""
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 
 from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
@@ -48,6 +48,31 @@ def error(mensaje, codigo):
     return jsonify({"error": mensaje}), codigo
 
 
+def validar_descripcion(valor):
+    if valor is None:
+        return "", None
+    if not isinstance(valor, str):
+        return None, "La descripción debe ser texto"
+    valor = valor.strip()
+    if len(valor) > 500:
+        return None, "La descripción no puede superar los 500 caracteres"
+    return valor, None
+
+
+def validar_fecha_limite(valor):
+    if valor is None:
+        return None, None
+    if not isinstance(valor, str):
+        return None, "La fecha límite no es válida"
+    try:
+        fecha = datetime.strptime(valor, "%Y-%m-%d").date()
+    except ValueError:
+        return None, "La fecha límite no es válida"
+    if fecha < date.today():
+        return None, "La fecha límite no puede ser anterior a hoy"
+    return valor, None
+
+
 def create_app(db_path: str = "tareas.db") -> Flask:
     app = Flask(__name__)
     app.config["DB_PATH"] = db_path
@@ -76,20 +101,17 @@ def create_app(db_path: str = "tareas.db") -> Flask:
         if len(titulo) < 3 or len(titulo) > 100:
             return error("El título debe tener entre 3 y 100 caracteres", 400)
 
-        descripcion = datos.get("descripcion")
-        if descripcion is None:
-            descripcion = ""
-        if not isinstance(descripcion, str):
-            return error("La descripción debe ser texto", 400)
-        descripcion = descripcion.strip()
+        descripcion, err = validar_descripcion(datos.get("descripcion"))
+        if err:
+            return error(err, 400)
 
         prioridad = datos.get("prioridad", "media")
         if prioridad not in ("alta", "media", "baja"):
             return error("La prioridad debe ser alta, media o baja", 400)
 
-        fecha_limite = datos.get("fecha_limite")
-        if fecha_limite is not None and not isinstance(fecha_limite, str):
-            return error("La fecha límite no es válida", 400)
+        fecha_limite, err = validar_fecha_limite(datos.get("fecha_limite"))
+        if err:
+            return error(err, 400)
 
         creada_en = datetime.now().isoformat(timespec="seconds")
 
