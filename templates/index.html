@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Tareas</title>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { margin-bottom: .5rem; }
+    form.crear, form.editar { display: grid; gap: .5rem; margin: 1rem 0; }
+    form.crear input, form.crear select,
+    form.editar input, form.editar select { padding: .4rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { border-bottom: 1px solid #ccc; padding: .5rem; text-align: left; vertical-align: top; }
+    tr.completada td { color: #888; text-decoration: line-through; }
+    .acciones button { margin-right: .3rem; }
+    .error { color: #b00020; margin: .5rem 0; }
+    .ok { color: #0a7a0a; margin: .5rem 0; }
+    .buscador { display: flex; gap: .5rem; align-items: center; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Tareas</h1>
+
+  <div id="mensaje"></div>
+
+  <form class="crear" id="form-crear">
+    <input name="titulo" placeholder="Título (obligatorio)" required>
+    <input name="descripcion" placeholder="Descripción (opcional)">
+    <select name="prioridad">
+      <option value="media">media</option>
+      <option value="alta">alta</option>
+      <option value="baja">baja</option>
+    </select>
+    <input name="fecha_limite" type="date">
+    <button type="submit">Crear tarea</button>
+  </form>
+
+  <div class="buscador">
+    <input id="q" placeholder="Buscar por título o descripción">
+    <select id="estado">
+      <option value="">Todas</option>
+      <option value="pendiente">Pendientes</option>
+      <option value="completada">Completadas</option>
+    </select>
+    <button id="btn-buscar">Buscar</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>Título</th><th>Prioridad</th><th>Fecha límite</th><th>Estado</th><th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody id="tabla"></tbody>
+  </table>
+
+  <script>
+    const API = "/api/tareas";
+    const mensaje = document.getElementById("mensaje");
+    const tabla = document.getElementById("tabla");
+
+    function mostrarError(texto) {
+      mensaje.innerHTML = '<div class="error">' + texto + '</div>';
+    }
+    function mostrarOk(texto) {
+      mensaje.innerHTML = '<div class="ok">' + texto + '</div>';
+    }
+    function limpiarMensaje() {
+      mensaje.innerHTML = "";
+    }
+
+    async function cargar() {
+      const q = document.getElementById("q").value.trim();
+      const estado = document.getElementById("estado").value;
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (estado) params.set("estado", estado);
+      const url = params.toString() ? API + "?" + params.toString() : API;
+
+      const resp = await fetch(url);
+      const datos = await resp.json();
+      if (!resp.ok) {
+        mostrarError(datos.error || "Error al cargar");
+        return;
+      }
+      pintar(datos);
+    }
+
+    function pintar(tareas) {
+      tabla.innerHTML = "";
+      if (tareas.length === 0) {
+        tabla.innerHTML = '<tr><td colspan="6">No hay tareas.</td></tr>';
+        return;
+      }
+      for (const t of tareas) {
+        const tr = document.createElement("tr");
+        if (t.completada) tr.classList.add("completada");
+
+        tr.innerHTML =
+          "<td>" + t.id + "</td>" +
+          "<td>" + escapar(t.titulo) + "</td>" +
+          "<td>" + escapar(t.prioridad) + "</td>" +
+          "<td>" + (t.fecha_limite ? escapar(t.fecha_limite) : "-") + "</td>" +
+          "<td>" + (t.completada ? "completada" : "pendiente") + "</td>" +
+          "<td class='acciones'></td>";
+
+        const acciones = tr.querySelector(".acciones");
+
+        if (!t.completada) {
+          const bEditar = document.createElement("button");
+          bEditar.textContent = "Editar";
+          bEditar.addEventListener("click", () => editar(t));
+          acciones.appendChild(bEditar);
+        }
+
+        if (!t.completada) {
+          const bComp = document.createElement("button");
+          bComp.textContent = "Completar";
+          bComp.addEventListener("click", () => completar(t.id));
+          acciones.appendChild(bComp);
+        }
+
+        const bElim = document.createElement("button");
+        bElim.textContent = "Eliminar";
+        bElim.addEventListener("click", () => eliminar(t.id));
+        acciones.appendChild(bElim);
+
+        tabla.appendChild(tr);
+      }
+    }
+
+    function escapar(texto) {
+      const d = document.createElement("div");
+      d.textContent = texto;
+      return d.innerHTML;
+    }
+
+    document.getElementById("form-crear").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      limpiarMensaje();
+      const f = ev.target;
+      const cuerpo = {
+        titulo: f.titulo.value,
+        descripcion: f.descripcion.value,
+        prioridad: f.prioridad.value,
+      };
+      if (f.fecha_limite.value) cuerpo.fecha_limite = f.fecha_limite.value;
+
+      const resp = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cuerpo),
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        mostrarError(datos.error || "Error al crear la tarea");
+        return;
+      }
+      f.reset();
+      mostrarOk("Tarea creada.");
+      cargar();
+    });
+
+    async function completar(id) {
+      limpiarMensaje();
+      const resp = await fetch(API + "/" + id + "/completar", { method: "POST" });
+      if (resp.status === 204 || resp.status === 200) {
+        if (resp.status !== 204) {
+          await resp.json();
+        }
+        mostrarOk("Tarea completada.");
+        cargar();
+        return;
+      }
+      const datos = await resp.json();
+      mostrarError(datos.error || "Error al completar");
+    }
+
+    async function eliminar(id) {
+      limpiarMensaje();
+      const resp = await fetch(API + "/" + id, { method: "DELETE" });
+      if (resp.status === 204) {
+        mostrarOk("Tarea eliminada.");
+        cargar();
+        return;
+      }
+      const datos = await resp.json();
+      mostrarError(datos.error || "Error al eliminar");
+    }
+
+    async function editar(t) {
+      limpiarMensaje();
+      const fila = document.createElement("tr");
+      fila.innerHTML =
+        "<td>" + t.id + "</td>" +
+        "<td><input class='e-titulo' value='" + atributo(t.titulo) + "'></td>" +
+        "<td><select class='e-prioridad'>" +
+          "<option value='alta'" + (t.prioridad === "alta" ? " selected" : "") + ">alta</option>" +
+          "<option value='media'" + (t.prioridad === "media" ? " selected" : "") + ">media</option>" +
+          "<option value='baja'" + (t.prioridad === "baja" ? " selected" : "") + ">baja</option>" +
+        "</select></td>" +
+        "<td><input class='e-fecha' type='date' value='" + (t.fecha_limite || "") + "'></td>" +
+        "<td>pendiente</td>" +
+        "<td class='acciones'></td>";
+
+      const acciones = fila.querySelector(".acciones");
+      const bGuardar = document.createElement("button");
+      bGuardar.textContent = "Guardar";
+      bGuardar.addEventListener("click", async () => {
+        limpiarMensaje();
+        const cuerpo = {
+          titulo: fila.querySelector(".e-titulo").value,
+          prioridad: fila.querySelector(".e-prioridad").value,
+          fecha_limite: fila.querySelector(".e-fecha").value || null,
+        };
+        const resp = await fetch(API + "/" + t.id, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(cuerpo),
+        });
+        const datos = await resp.json();
+        if (!resp.ok) {
+          mostrarError(datos.error || "Error al editar");
+          return;
+        }
+        mostrarOk("Tarea actualizada.");
+        cargar();
+      });
+      acciones.appendChild(bGuardar);
+
+      const bCancelar = document.createElement("button");
+      bCancelar.textContent = "Cancelar";
+      bCancelar.addEventListener("click", () => cargar());
+      acciones.appendChild(bCancelar);
+
+      const actual = tabla.querySelectorAll("tr");
+      for (let i = 0; i < actual.length; i++) {
+        if (actual[i].firstChild.textContent === String(t.id)) {
+          actual[i].replaceWith(fila);
+          break;
+        }
+      }
+    }
+
+    function atributo(texto) {
+      return String(texto).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+    }
+
+    document.getElementById("btn-buscar").addEventListener("click", (ev) => {
+      ev.preventDefault();
+      cargar();
+    });
+
+    cargar();
+  </script>
+</body>
+</html>
